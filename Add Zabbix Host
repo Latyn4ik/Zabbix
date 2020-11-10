@@ -1,0 +1,38 @@
+#!/bin/bash
+
+IP=$(hostname -I | awk '{print $1}')  
+HOST_NAME=zabbix_host_$IP
+ZABBIX_USER='****' 
+ZABBIX_PASS='****'
+Zabbix_Server=192.168.125.192
+API="http://$Zabbix_Server/zabbix/api_jsonrpc.php"
+HOSTGROUPID=6
+TEMPLATEID=10001 
+
+sed -i "s/Server=[^ ]*/Server=$Zabbix_Server/" /etc/zabbix/zabbix_agentd.conf
+sed -i "s/Hostname=[^ ]*/Hostname=$HOST_NAME/" /etc/zabbix/zabbix_agentd.conf
+
+authenticate() {  
+  echo curl -k -s -H 'Content-Type: application/json-rpc' -d "{\"jsonrpc\": \"2.0\",\"method\":\"user.login\",\"params\":{\"user\":\""${ZABBIX_USER}"\",\"password\":\""${ZABBIX_PASS}"\"},\"auth\": null,\"id\":0}" $API  
+}   
+AUTH_TOKEN=`echo $(authenticate) | awk -F'"' '{print $8}'`
+ # Create Host  
+create_host() {  
+        echo curl -k -s -H 'Content-Type: application/json-rpc' -d "{\"jsonrpc\":\"2.0\",\"method\":\"host.create\",\"params\": {\"host\":\"$HOST_NAME\",\"interfaces\": [{\"type\": 1,\"main\": 1,\"useip\": 1,\"ip\": \"$IP\",\"dns\": \"\",\"port\": \"10050\"}],\"groups\": [{\"groupid\": \"$HOSTGROUPID\"}],\"templates\": [{\"templateid\": \"$TEMPLATEID\"}]},\"auth\":\"$AUTH_TOKEN\",\"id\":1}" $API  
+    }  
+output=$(create_host)  
+echo $output | grep -q "hostids"  
+rc=$?  
+if [ $rc -ne 0 ]  
+then  
+    echo -e "Error in adding host ${HOST_NAME} at date:\n"  
+    echo $output | grep -Po '"message":.*?[^\\]",'  
+    echo $output | grep -Po '"data":.*?[^\\]"'  
+    exit  
+else  
+    echo -e "\nHost ${HOST_NAME} added successfully\n"
+    ufw allow 10050/udp
+    ufw allow 10050/tcp
+    systemctl restart zabbix-agent
+    exit  
+fi
